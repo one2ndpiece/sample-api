@@ -12,6 +12,6 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o
 FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=build /out/sample-api /sample-api
-USER nonroot:nonroot
+USER 65532:65532
 EXPOSE 8080 9090
 ENTRYPOINT ["/sample-api"]
