@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.25.1-bookworm AS build
+FROM golang:1.26.3-bookworm AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -15,4 +15,3 @@ COPY --from=build /out/sample-api /sample-api
 USER nonroot:nonroot
 EXPOSE 8080 9090
 ENTRYPOINT ["/sample-api"]
-
