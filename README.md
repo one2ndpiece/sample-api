@@ -11,6 +11,20 @@ It exposes:
 
 Kubernetes manifests live under `deploy/k8s`. The lab cluster overlay is `deploy/k8s/overlays/lab`.
 
+## Development Environment
+
+This repository has its own Nix dev shell. From this directory:
+
+```sh
+direnv allow
+```
+
+Or enter it manually:
+
+```sh
+nix develop
+```
+
 ## Local Run
 
 ```sh
@@ -24,4 +38,3 @@ go run ./cmd/sample-api
 docker build -t sample-api:local .
 docker run --rm -p 8080:8080 -p 9090:9090 sample-api:local
 ```
-

@@ -1,4 +1,5 @@
 .env
+.direnv/
 /dist/
 /tmp/
 /sample-api
