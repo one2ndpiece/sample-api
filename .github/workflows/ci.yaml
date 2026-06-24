@@ -1,0 +1,173 @@
+name: sample-api
+
+on:
+  pull_request:
+    paths:
+      - cmd/**
+      - internal/**
+      - deploy/k8s/**
+      - Dockerfile
+      - go.mod
+      - go.sum
+      - .github/workflows/ci.yaml
+  push:
+    branches:
+      - main
+    paths:
+      - cmd/**
+      - internal/**
+      - deploy/k8s/**
+      - Dockerfile
+      - go.mod
+      - go.sum
+      - .github/workflows/ci.yaml
+
+concurrency:
+  group: sample-api-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  quality:
+    name: Test, vet, and validate manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.3
+
+      - name: Set up Go
+        uses: actions/setup-go@v6.4.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+
+      - name: Scan Go dependencies
+        run: govulncheck ./...
+
+      - name: Set up Kustomize
+        uses: imranismail/setup-kustomize@v3.0.0
+
+      - name: Build lab manifests
+        run: kustomize build deploy/k8s/overlays/lab >/tmp/sample-api-lab.yaml
+
+  image:
+    name: Build and publish image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      IMAGE: ghcr.io/one2ndpiece/sample-api
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.1.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish
+        uses: docker/build-push-action@v7.2.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+            ${{ env.IMAGE }}:main
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:sha-${{ github.sha }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Set up Kustomize
+        uses: imranismail/setup-kustomize@v3.0.0
+
+      - name: Update the GitOps image tag
+        env:
+          IMAGE_TAG: sha-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git pull --rebase origin main
+          cd deploy/k8s/overlays/lab
+          kustomize edit set image "${IMAGE}=${IMAGE}:${IMAGE_TAG}"
+          cd ../../../..
+
+          if git diff --quiet -- deploy/k8s/overlays/lab/kustomization.yaml; then
+            echo "The GitOps image tag is already current."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/k8s/overlays/lab/kustomization.yaml
+          git commit -m "sample-apiのイメージを${IMAGE_TAG}へ更新"
+          git push origin HEAD:main
+
+      - name: Remove old GHCR versions
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          versions="$(
+            gh api --paginate \
+              "/users/${GITHUB_REPOSITORY_OWNER}/packages/container/sample-api/versions?per_page=100" \
+              | jq -s 'add | sort_by(.created_at) | reverse'
+          )"
+          mapfile -t old_version_ids < <(
+            jq -r '
+              [.[] | select((.metadata.container.tags // []) | length > 0)] as $tagged
+              | if ($tagged | length) <= 10 then
+                  empty
+                else
+                  (($tagged[9].created_at | fromdateiso8601) - 60) as $cutoff
+                  | .[]
+                  | select((.created_at | fromdateiso8601) < $cutoff)
+                  | select(
+                      ((.metadata.container.tags // [])
+                        | any(. == "main" or . == "latest"))
+                      | not
+                    )
+                  | .id
+                end
+            ' <<<"$versions"
+          )
+
+          for version_id in "${old_version_ids[@]}"; do
+            gh api --method DELETE \
+              "/users/${GITHUB_REPOSITORY_OWNER}/packages/container/sample-api/versions/${version_id}"
+          done

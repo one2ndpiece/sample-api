@@ -1,0 +1,41 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: sample-api
+  labels:
+    app.kubernetes.io/name: sample-api
+    app.kubernetes.io/part-of: sample-api
+spec:
+  groups:
+    - name: sample-api
+      rules:
+        - alert: SampleAPIHighErrorRate
+          expr: |
+            (
+              sum(rate(sample_api_http_requests_total{status=~"5.."}[2m]))
+              /
+              clamp_min(sum(rate(sample_api_http_requests_total[2m])), 0.001)
+            ) > 0.10
+            and
+            sum(increase(sample_api_http_requests_total[2m])) >= 10
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: sample-apiの5xx率が10%を超えています
+            description: 直近2分に10件以上のリクエストがあり、5xx率が1分間10%を超えています。
+        - alert: SampleAPIHighLatency
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le) (rate(sample_api_http_request_duration_seconds_bucket[2m]))
+            ) > 1
+            and
+            sum(increase(sample_api_http_request_duration_seconds_count[2m])) >= 10
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: sample-apiのp95レイテンシが1秒を超えています
+            description: 直近2分に10件以上のリクエストがあり、p95レイテンシが1分間1秒を超えています。
+
