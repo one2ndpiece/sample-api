@@ -12,4 +12,4 @@ resources:
 images:
 - name: ghcr.io/one2ndpiece/sample-api
   newName: ghcr.io/one2ndpiece/sample-api
-  newTag: sha-ed3e64e03e923a80adcc8920e17aec258bd3ad52
+  newTag: sha-63543cd08930e069d1b8d677bfc18d974c0477e1
